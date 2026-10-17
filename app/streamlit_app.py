@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -13,13 +14,32 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Streamlit Community Cloud keeps keys in st.secrets; copy top-level string values into the
+# environment so tracer.config reads them like a local .env. Existing env vars win.
+try:
+    for _k, _v in st.secrets.items():
+        if isinstance(_v, str):
+            os.environ.setdefault(_k, _v)
+except Exception:  # noqa: BLE001 - no secrets file locally is normal
+    pass
+
 from tracer import config  # noqa: E402
+from tracer.diagnostics import run_checks  # noqa: E402
 from tracer.events.root_cause import trace_event  # noqa: E402
 from tracer.models import CONFIDENCE_KO, RELATION_KO, TERMINAL_KO  # noqa: E402
 from tracer.orchestrator import Tracer  # noqa: E402
 from tracer.report import to_dot, to_json, to_markdown  # noqa: E402
 
 st.set_page_config(page_title="지배구조 역추적", layout="wide")
+
+# Demo cases from PLANS.md (README §9).
+DEMOS = {
+    "A 카카오": "카카오",
+    "B 한국쉘석유": "한국쉘석유",
+    "B S-OIL": "에쓰-오일",
+    "C 고려아연": "고려아연",
+    "GLEIF·SEC 예시": "549300G81RQKP7XW2N18",
+}
 
 
 @st.cache_resource
@@ -99,10 +119,20 @@ with st.sidebar:
     st.header("소스 상태")
     for line in source_status():
         st.write(line)
-    st.caption("키는 .env에 넣는다 (.env.example 참고). 없는 소스는 건너뛰고 '확인 불가'로 남긴다.")
+    st.caption("로컬은 .env, Streamlit Cloud는 앱 설정의 Secrets에 키를 넣는다. 없는 소스는 건너뛰고 '확인 불가'로 남긴다.")
+    if st.button("연결 점검"):
+        with st.spinner("소스마다 한 번씩 호출 중..."):
+            for c in run_checks(tracer()):
+                st.write(f"{'✅' if c.ok else '❌'} **{c.source}** — {c.message}")
 
 mode = st.radio("모드", ["지배구조 역추적", "이벤트 원인 추적"], horizontal=True)
 if mode == "지배구조 역추적":
+    cols = st.columns(len(DEMOS))
+    for col, (label, q) in zip(cols, DEMOS.items()):
+        if col.button(label, use_container_width=True):
+            st.session_state["query"] = q
+            with st.spinner("소스를 호출하며 추적 중..."):
+                st.session_state["graph"] = tracer().trace(q)
     with st.form("trace"):
         q = st.text_input("기업명 · LEI · 사업자등록번호 · 종목코드 (또는 lei:/dart:/ch:/cik: 식별자)",
                           value=st.session_state.get("query", ""))

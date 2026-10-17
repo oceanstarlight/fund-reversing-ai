@@ -14,7 +14,8 @@
 - 테스트: `python -m pytest -q` (네트워크·API 키 불필요, `tests/fakes.py`의 가짜 HTTP 사용)
 - CLI: `python scripts/trace.py "기업명|LEI|사업자번호|종목코드"`
 - 앱: `streamlit run app/streamlit_app.py`
-- 영국 데이터: `python scripts/build_ch_index.py` (Companies House 일괄 데이터 → `data/ch/companies_house.sqlite`, API 키 안 씀)
+- 실제 소스 점검: `python scripts/smoke.py --trace`. 배포·테스트 방법은 `docs/deploy.md`
+- 영국 데이터(보류 중): `python scripts/build_ch_index.py` (Companies House 일괄 데이터 → `data/ch/companies_house.sqlite`, API 키 안 씀)
 - 추적·매칭·확신도 판정은 전부 결정적 코드(`tracer/orchestrator.py`, `tracer/sources/*`)가 한다.
   LLM은 문서(LPA·PPM)에서 지분 조항을 뽑는 `tracer/extract.py`에만 쓰고, 원문 인용이 확인된 값만 남기며 결과는 항상 "추정"+사람 검토로 보낸다.
 - 지분율은 소스 원문 값만 쓴다. 범위로 공시된 값(Companies House 25~50% 등)은 범위 그대로 표시한다.

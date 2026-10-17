@@ -27,8 +27,9 @@ REPORT_DIR = ROOT / "reports"
 
 
 def env(name: str) -> str:
-    """Read a key at call time so tests and the app can change it without re-import."""
-    return os.environ.get(name, "").strip()
+    """Read a key at call time so tests and the app can change it without re-import.
+    Quotes pasted together with a value (KEY= "value") are dropped."""
+    return os.environ.get(name, "").strip().strip('"').strip("'").strip()
 
 
 # HTTP. Responses are cached on disk keyed by URL and non-secret params, so a re-run of the
@@ -77,4 +78,5 @@ LLM_CACHE = os.environ.get("TRACER_LLM_CACHE", "1") != "0"
 LLM_CACHE_DIR = Path(os.environ.get("TRACER_LLM_CACHE_DIR", DATA_DIR / "llm_cache"))
 
 # Shown on every result screen (README §9: fixed display of the supported scope).
-SUPPORTED_SCOPE_KO = "지원 범위: 한국 상장사(DART) · 미국(SEC EDGAR) · 영국(Companies House) 심화, 그 외 관할은 GLEIF 회계상 모회사까지"
+SUPPORTED_SCOPE_KO = ("지원 범위: 한국 상장사(DART) · 미국(SEC EDGAR) 심화, 그 외 관할은 GLEIF 회계상 모회사까지 "
+                      "(영국 Companies House는 데이터 색인이 있을 때만)")
