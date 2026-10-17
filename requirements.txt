@@ -1,0 +1,9 @@
+requests>=2.32
+pydantic>=2.10
+rapidfuzz>=3.9
+diskcache>=5.6
+streamlit>=1.40
+pytest>=8.0
+# 선택: 문서 추출(LPA·PPM)에만 쓴다. 키가 없으면 그 기능만 꺼진다.
+anthropic>=1.15
+google-genai>=2.0
