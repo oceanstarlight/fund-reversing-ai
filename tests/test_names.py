@@ -21,3 +21,9 @@ def test_classify_holder():
     assert names.classify_holder("삼성생명공익재단") == EntityKind.FOUNDATION
     assert names.classify_holder("BlackRock Fund Advisors") == EntityKind.FUND
     assert names.classify_holder("Omega Holdings Limited") == EntityKind.COMPANY
+
+
+def test_parenthesized_alias_and_article():
+    assert names.score("에쓰-오일", "에쓰-오일 (S-OIL) (주)") == 100
+    assert names.score("S-Oil Corporation", "에쓰-오일 (S-OIL) (주)") == 100
+    assert names.normalize("SHELL PETROLEUM COMPANY LIMITED(THE)") == names.normalize("The Shell Petroleum Company Limited")

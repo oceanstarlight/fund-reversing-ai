@@ -10,12 +10,13 @@ from rapidfuzz import fuzz
 from tracer import config
 from tracer.models import Confidence, EntityKind
 
-# Legal-form tokens removed before comparing names. "Holdings" is kept on purpose: "X Holdings"
-# and "X" are usually different entities of one group.
+# Legal-form tokens (and the article "the", which UK registers also write as a "(THE)" suffix)
+# removed before comparing names. "Holdings" is kept on purpose: "X Holdings" and "X" are
+# usually different entities of one group.
 _LEGAL_FORMS = [
     r"주식회사", r"\(주\)", r"㈜", r"유한회사", r"\(유\)", r"유한책임회사", r"합자회사", r"재단법인", r"사단법인",
     r"public limited company", r"incorporated", r"corporation", r"company", r"limited",
-    r"inc", r"corp", r"co", r"ltd", r"llc", r"llp", r"lp", r"plc", r"sa", r"ag", r"nv", r"bv", r"gmbh", r"pte", r"kk",
+    r"inc", r"corp", r"co", r"ltd", r"llc", r"llp", r"lp", r"plc", r"sa", r"ag", r"nv", r"bv", r"gmbh", r"pte", r"kk", r"the",
 ]
 _FORM_RE = re.compile(r"(?<![a-z0-9])(?:" + "|".join(_LEGAL_FORMS) + r")(?![a-z0-9])", re.IGNORECASE)
 
@@ -28,14 +29,24 @@ def normalize(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
+def variants(name: str) -> set[str]:
+    """Normalized forms of a name: as written, without parenthesized parts, and each
+    parenthesized part alone ("에쓰-오일 (S-OIL) (주)" -> "에쓰 오일 s oil", "에쓰 오일", "s oil")."""
+    raw = _FORM_RE.sub(" ", unicodedata.normalize("NFKC", name or "").lower())
+    out = {normalize(name), normalize(re.sub(r"\([^)]*\)", " ", raw))}
+    out.update(normalize(p) for p in re.findall(r"\(([^)]*)\)", raw))
+    return {v for v in out if v}
+
+
 def score(a: str, b: str) -> float:
-    """Similarity 0-100 of two names after normalization."""
-    na, nb = normalize(a), normalize(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb:
-        return 100.0
-    return float(fuzz.token_sort_ratio(na, nb))
+    """Similarity 0-100 of two names: best match over their normalized variants."""
+    best = 0.0
+    for na in variants(a):
+        for nb in variants(b):
+            if na == nb:
+                return 100.0
+            best = max(best, float(fuzz.token_sort_ratio(na, nb)))
+    return best
 
 
 def match_confidence(s: float) -> Confidence | None:

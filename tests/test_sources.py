@@ -1,7 +1,8 @@
 from datetime import date
 
-from tests.fakes import CH, FakeHttp
+from tests.fakes import FakeHttp, ch_index
 from tracer.models import Entity, Terminal
+from tracer.sources.ch_index import ChIndex
 from tracer.sources.companies_house import CompaniesHouseSource, describe_control
 from tracer.sources.dart import report_order
 from tracer.sources.sec import SecSource, parse_schedule_xml
@@ -37,13 +38,11 @@ def test_sec_13g_only_holders_are_dispersed(monkeypatch):
     assert "xsl" in res.edges[0].evidence[0].url  # human-readable rendering
 
 
-def test_companies_house_no_psc_statement_is_dispersed(monkeypatch):
-    monkeypatch.setenv("COMPANIES_HOUSE_API_KEY", "k")
-    h = FakeHttp()
-    h.add(f"{CH}/company/00000009/persons-with-significant-control", {"items": []})
-    h.add(f"{CH}/company/00000009/persons-with-significant-control-statements",
-          {"items": [{"statement": "no-individual-or-entity-with-signficant-control"}]})
-    res = CompaniesHouseSource(h).owners(Entity("ch:00000009", "X Ltd", jurisdiction="GB", identifiers={"ch": "00000009"}))
+def test_companies_house_no_psc_statement_is_dispersed(tmp_path):
+    path = ch_index(tmp_path / "ch.sqlite", [("00000009", "X LIMITED")], [
+        {"company_number": "00000009", "data": {"kind": "persons-with-significant-control-statement",
+                                                "statement": "no-individual-or-entity-with-signficant-control"}}])
+    res = CompaniesHouseSource(FakeHttp(), ChIndex(path)).owners(Entity("ch:00000009", "X Ltd", jurisdiction="GB", identifiers={"ch": "00000009"}))
     assert res.terminal == Terminal.DISPERSED
 
 
@@ -55,3 +54,16 @@ def test_describe_control_keeps_bands():
 def test_dart_report_order_newest_first():
     order = report_order(date(2026, 10, 17))
     assert order[:4] == [("2026", "11014"), ("2026", "11012"), ("2026", "11013"), ("2025", "11011")]
+
+
+def test_companies_house_corporate_psc_and_search(tmp_path):
+    path = ch_index(tmp_path / "ch.sqlite", [("00000010", "CHILD LIMITED"), ("00000011", "PARENT HOLDINGS PLC")], [
+        {"company_number": "00000010", "data": {
+            "kind": "corporate-entity-person-with-significant-control", "name": "Parent Holdings plc",
+            "natures_of_control": [None, "ownership-of-shares-75-to-100-percent"],  # nulls occur in the snapshot
+            "identification": {"country_registered": "England & Wales", "registration_number": "11"}}}])
+    src = CompaniesHouseSource(FakeHttp(), ChIndex(path))
+    res = src.owners(Entity("ch:00000010", "CHILD LIMITED", jurisdiction="GB", identifiers={"ch": "00000010"}))
+    assert res.entities[0].id == "ch:00000011"  # joined by registration number, not by name
+    assert src.search("Parent Holdings PLC").candidates[0].entity.id == "ch:00000011"
+    assert src.get("10").name == "CHILD LIMITED"
