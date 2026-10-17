@@ -45,9 +45,16 @@ MIN_INTERVAL_SEC = {"www.sec.gov": 0.12, "data.sec.gov": 0.12}
 # Companies House bulk data index (built by scripts/build_ch_index.py; no account needed).
 CH_INDEX_PATH = Path(os.environ.get("TRACER_CH_INDEX", DATA_DIR / "ch" / "companies_house.sqlite"))
 
-# Tracing limits.
+# Tracing limits. MAX_ENTITIES counts entities whose owners were queried; holders that end the
+# trace (individuals, funds, ...) do not use it up, so a long list of small holders cannot
+# stop the walk before a corporate holder is followed.
 MAX_DEPTH = int(os.environ.get("TRACER_MAX_DEPTH", "8"))
 MAX_ENTITIES = int(os.environ.get("TRACER_MAX_ENTITIES", "60"))
+
+# Graph display. Per entity, holders below DISPLAY_MIN_PCT (and beyond DISPLAY_MAX_HOLDERS) are
+# folded into one "그 외 보유자" node; the evidence table still lists every holder.
+DISPLAY_MIN_PCT = 1.0
+DISPLAY_MAX_HOLDERS = 8
 
 # Name matching (rapidfuzz WRatio on normalized names, 0-100).
 # >= AUTO: link automatically as confirmed. >= REVIEW: link as estimated and add a review item.

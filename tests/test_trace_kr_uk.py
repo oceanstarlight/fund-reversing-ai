@@ -85,3 +85,22 @@ def test_missing_index_is_reported_not_raised(http, monkeypatch, tmp_path):
 def test_unit_messages_have_no_digits(http):
     g = Tracer(http, today=date(2026, 10, 17)).trace("알파전자")
     assert all(not any(ch.isdigit() for ch in u.message) for u in g.unknowns)
+
+
+def test_same_name_prefers_the_listed_company(http):
+    corps = [{"corp_code": "00000001", "corp_name": "알파전자", "stock_code": "111111"},
+             {"corp_code": "00000009", "corp_name": "알파전자", "stock_code": ""}]
+    http.routes.insert(0, (f"{DART}/corpCode.xml", {}, 200, corpcode_zip(corps)))
+    g = Tracer(http, today=date(2026, 10, 17)).trace("알파전자")
+    assert g.root_id == "dart:00000001"
+
+
+def test_many_small_holders_do_not_stop_the_trace(http, monkeypatch):
+    rows = [("베타홀딩스(주)", "본인", "30.50")] + [(f"임원{i:02d}", "임원", "0.00") for i in range(80)]
+    http.routes.insert(0, (f"{DART}/hyslrSttus.json", {"corp_code": "00000001"}, 200, hyslr(rows)))
+    monkeypatch.setattr(config, "MAX_ENTITIES", 10)
+    g = Tracer(http, today=date(2026, 10, 17)).trace("알파전자")
+    assert g.entities["dart:00000002"].terminal != Terminal.LIMIT  # 베타홀딩스 was still traced
+    from tracer.report import display_split, to_dot
+    shown, folded = display_split(g)
+    assert len(folded["dart:00000001"]) == 80 and "그 외 보유자 80명" in to_dot(g)

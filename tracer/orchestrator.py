@@ -203,7 +203,7 @@ class Tracer:
             if ent.kind in KIND_TERMINAL:
                 ent.terminal = ent.terminal or KIND_TERMINAL[ent.kind]
                 continue
-            if depth >= config.MAX_DEPTH or len(g.entities) >= config.MAX_ENTITIES:
+            if depth >= config.MAX_DEPTH or len(expanded) > config.MAX_ENTITIES:
                 ent.terminal, ent.terminal_note = Terminal.LIMIT, "깊이 또는 법인 수 제한"
                 continue
             g.unknowns += self.link(ent)

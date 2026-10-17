@@ -6,7 +6,8 @@ import json
 
 from tracer import config
 from tracer.models import (
-    CONFIDENCE_KO, RELATION_KO, TERMINAL_KO, Confidence, EntityKind, OwnershipGraph, Relation,
+    CONFIDENCE_KO, OWNERSHIP_RELATIONS, RELATION_KO, TERMINAL_KO, Confidence, Edge, Entity, EntityKind,
+    OwnershipGraph, Relation,
 )
 
 _EDGE_STYLE = {
@@ -26,11 +27,47 @@ def _q(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
 
 
+def display_split(g: OwnershipGraph) -> tuple[list[Edge], dict[str, list[Edge]]]:
+    """(edges to draw, folded holder edges per owned entity id).
+
+    Kept per owned entity: corporate holders (the ones traced further), holders without a single
+    disclosed number (ranges), and holders at or above DISPLAY_MIN_PCT, at most
+    DISPLAY_MAX_HOLDERS by disclosed share. Accounting-parent edges are always drawn."""
+    shown: list[Edge] = []
+    folded: dict[str, list[Edge]] = {}
+    by_owned: dict[str, list[Edge]] = {}
+    for ed in g.edges:
+        if ed.relation in OWNERSHIP_RELATIONS:
+            by_owned.setdefault(ed.owned_id, []).append(ed)
+        else:
+            shown.append(ed)
+    for owned, eds in by_owned.items():
+        def important(ed: Edge) -> bool:
+            owner = g.entities[ed.owner_id]
+            return (owner.kind in (EntityKind.COMPANY, EntityKind.UNKNOWN) or ed.share_pct is None
+                    or ed.share_pct >= config.DISPLAY_MIN_PCT)
+        keep = sorted((e for e in eds if important(e)), key=lambda e: -(e.share_pct if e.share_pct is not None else 101))
+        keep = keep[:config.DISPLAY_MAX_HOLDERS]
+        shown += keep
+        rest = [e for e in eds if e not in keep]
+        if rest:
+            folded[owned] = rest
+    return shown, folded
+
+
+def shown_entity_ids(g: OwnershipGraph, shown: list[Edge]) -> set[str]:
+    return {g.root_id} | {i for e in shown for i in (e.owner_id, e.owned_id)}
+
+
 def to_dot(g: OwnershipGraph) -> str:
-    """Owners on top, the queried entity at the bottom."""
+    """Owners on top, the queried entity at the bottom. Small holders are folded (display_split)."""
+    shown, folded = display_split(g)
+    ids = shown_entity_ids(g, shown)
     lines = ["digraph G {", "  rankdir=BT; node [fontname=\"Helvetica\" fontsize=11 style=filled fillcolor=\"#ffffff\"];"]
     cyc = {i for f in g.flags for i in f.path}
     for e in g.entities.values():
+        if e.id not in ids:
+            continue
         label = e.name + (f"\n[{e.jurisdiction}]" if e.jurisdiction else "")
         if e.terminal is not None:
             label += f"\n· {TERMINAL_KO[e.terminal]}"
@@ -39,15 +76,29 @@ def to_dot(g: OwnershipGraph) -> str:
         if e.terminal is not None and e.kind == EntityKind.COMPANY:
             shape = "octagon" if e.terminal.value in ("data_end", "unresolved", "unsupported", "limit") else "box"
         lines.append(f"  {_q(e.id)} [label={_q(label)} shape={shape} fillcolor=\"{fill}\"];")
-    for ed in g.edges:
+    for ed in shown:
         accounting = ed.relation in (Relation.ACCOUNTING_PARENT, Relation.ULTIMATE_ACCOUNTING_PARENT)
         style = _ACCOUNTING_STYLE if accounting else _EDGE_STYLE[ed.confidence]
         label = ed.share_text + ("%" if ed.share_pct is not None and not ed.share_text.endswith("%") else "")
         if accounting:
             label = RELATION_KO[ed.relation]
         lines.append(f"  {_q(ed.owned_id)} -> {_q(ed.owner_id)} [{style} label={_q(label)} fontsize=9 dir=back];")
+    for owned, eds in folded.items():
+        node = f"folded:{owned}"
+        lines.append(f"  {_q(node)} [label={_q(f'그 외 보유자 {len(eds)}명' + chr(10) + '(근거 표에서 확인)')} "
+                     f"shape=note fillcolor=\"#f7f7f7\" fontcolor=\"#555555\"];")
+        lines.append(f"  {_q(owned)} -> {_q(node)} [color=\"#9a9a9a\" style=dashed dir=back];")
     lines.append("}")
     return "\n".join(lines)
+
+
+def key_terminals(g: OwnershipGraph) -> tuple[list[Entity], int]:
+    """(terminals drawn in the graph, number of other terminals folded away)."""
+    shown, _ = display_split(g)
+    ids = shown_entity_ids(g, shown)
+    terms = g.terminals()
+    key = [e for e in terms if e.id in ids]
+    return key, len(terms) - len(key)
 
 
 def to_markdown(g: OwnershipGraph) -> str:
@@ -59,8 +110,11 @@ def to_markdown(g: OwnershipGraph) -> str:
         out += [f"- {c['name']} ({c['jurisdiction'] or '-'}) `{c['id']}` 유사도 {c['score']}" for c in g.candidates]
         return "\n".join(out)
     out += ["## 종착점", ""]
-    for e in g.terminals():
+    key, others = key_terminals(g)
+    for e in key:
         out.append(f"- **{e.name}** — {TERMINAL_KO[e.terminal]}" + (f" ({e.terminal_note})" if e.terminal_note else ""))
+    if others:
+        out.append(f"- 그 외 소액 보유자 {others}명 (연결과 근거 표 참고)")
     out += ["", "## 연결과 근거", "", "| 보유자 | 대상 | 관계 | 지분(원문) | 확신도 | 기준 시점 | 근거 |", "|---|---|---|---|---|---|---|"]
     for ed in g.edges:
         ev = ed.evidence[0] if ed.evidence else None

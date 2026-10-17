@@ -108,7 +108,12 @@ class DartSource(Source):
             if exact:
                 # Prefer listed companies when several share a name.
                 exact.sort(key=lambda c: (not c.get("stock_code"), c["corp_code"]))
-                out.candidates = [Candidate(self._entity(c), 100.0, c["corp_name"]) for c in exact[:5]]
+                listed = [c for c in exact if c.get("stock_code")]
+                # Same name, one listed: the listed one is the intended target (README: 상장사 출발점);
+                # the others stay as candidates just below the auto-link threshold.
+                unique_listed = len(listed) == 1
+                out.candidates = [Candidate(self._entity(c), 100.0 if not unique_listed or c is listed[0] else 95.0,
+                                            c["corp_name"]) for c in exact[:5]]
                 return out
             hits = process.extract(q, [c["_norm"] for c in corps], scorer=fuzz.token_sort_ratio, limit=5)
             out.candidates = [Candidate(self._entity(corps[i]), float(s), corps[i]["corp_name"]) for _, s, i in hits]

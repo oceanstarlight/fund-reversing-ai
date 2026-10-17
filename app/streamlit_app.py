@@ -28,7 +28,7 @@ from tracer.diagnostics import run_checks  # noqa: E402
 from tracer.events.root_cause import trace_event  # noqa: E402
 from tracer.models import CONFIDENCE_KO, RELATION_KO, TERMINAL_KO  # noqa: E402
 from tracer.orchestrator import Tracer  # noqa: E402
-from tracer.report import to_dot, to_json, to_markdown  # noqa: E402
+from tracer.report import key_terminals, to_dot, to_json, to_markdown  # noqa: E402
 
 st.set_page_config(page_title="지배구조 역추적", layout="wide")
 
@@ -78,7 +78,8 @@ def show_graph(g) -> None:
     tab_edges, tab_review, tab_end, tab_log = st.tabs(["연결과 근거", "사람 검토 목록", "종착점·한계", "추적 로그"])
     with tab_edges:
         rows = []
-        for e in g.edges:
+        # Largest disclosed holdings first; ranges and accounting links (no single number) on top.
+        for e in sorted(g.edges, key=lambda e: -(e.share_pct if e.share_pct is not None else 101)):
             ev = e.evidence[0] if e.evidence else None
             rows.append({
                 "보유자": g.entities[e.owner_id].name, "대상": g.entities[e.owned_id].name,
@@ -95,8 +96,11 @@ def show_graph(g) -> None:
             link = f" · [원문]({r.links[0]})" if r.links else ""
             st.markdown(f"**P{r.priority}** {r.message}{link}")
     with tab_end:
-        for e in g.terminals():
+        key, others = key_terminals(g)
+        for e in key:
             st.markdown(f"- **{e.name}** — {TERMINAL_KO[e.terminal]}" + (f" ({e.terminal_note})" if e.terminal_note else ""))
+        if others:
+            st.markdown(f"- 그 외 소액 보유자 {others}명 (연결과 근거 표 참고)")
         if g.flags:
             st.error("구조 이상: " + " / ".join(
                 ("상호출자 " if f.kind == "mutual" else "순환출자 ") + " · ".join(g.entities[i].name for i in f.path) for f in g.flags))
