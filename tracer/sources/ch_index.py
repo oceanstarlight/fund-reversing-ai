@@ -177,17 +177,23 @@ class ChIndex:
         return self.con().execute("SELECT name, status FROM companies WHERE number=?", (number,)).fetchone()
 
     def search(self, name: str, limit: int = 10) -> list[tuple[str, str, str]]:
-        """(number, name, status) whose normalized name equals or starts with the query's first word."""
+        """(number, name, status) whose normalized name equals the query or starts with its first words."""
         q = names.normalize(name)
         if not q:
             return []
         rows = self.con().execute("SELECT number, name, status FROM companies WHERE norm=? LIMIT ?", (q, limit)).fetchall()
         if rows:
             return rows
-        first = q.split()[0]
-        return self.con().execute(
-            "SELECT number, name, status FROM companies WHERE norm >= ? AND norm < ? LIMIT 500",
-            (first, first + "￿")).fetchall()
+        # Narrowest prefix first, so a common first word ("shell") does not crowd out the match.
+        words = q.split()
+        for n in range(min(len(words), 3), 0, -1):
+            prefix = " ".join(words[:n])
+            rows = self.con().execute(
+                "SELECT number, name, status FROM companies WHERE norm >= ? AND norm < ? LIMIT 500",
+                (prefix, prefix + "\uffff")).fetchall()
+            if rows:
+                return rows
+        return []
 
     def psc(self, number: str) -> list[dict]:
         """Active PSC entries in the API's item shape."""
