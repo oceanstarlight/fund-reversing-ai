@@ -60,7 +60,7 @@ def test_companies_house_corporate_psc_and_search(tmp_path):
     path = ch_index(tmp_path / "ch.sqlite", [("00000010", "CHILD LIMITED"), ("00000011", "PARENT HOLDINGS PLC")], [
         {"company_number": "00000010", "data": {
             "kind": "corporate-entity-person-with-significant-control", "name": "Parent Holdings plc",
-            "natures_of_control": ["ownership-of-shares-75-to-100-percent"],
+            "natures_of_control": [None, "ownership-of-shares-75-to-100-percent"],  # nulls occur in the snapshot
             "identification": {"country_registered": "England & Wales", "registration_number": "11"}}}])
     src = CompaniesHouseSource(FakeHttp(), ChIndex(path))
     res = src.owners(Entity("ch:00000010", "CHILD LIMITED", jurisdiction="GB", identifiers={"ch": "00000010"}))

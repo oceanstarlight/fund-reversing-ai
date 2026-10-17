@@ -90,7 +90,7 @@ def psc_rows(lines) -> Iterator[tuple[str, tuple]]:
         if not kind or kind == "totals#persons-of-significant-control-snapshot":
             continue
         ident = d.get("identification") or {}
-        yield "psc", (number, kind, d.get("name", ""), ",".join(d.get("natures_of_control") or []),
+        yield "psc", (number, kind, d.get("name", ""), ",".join(n for n in d.get("natures_of_control") or [] if n),
                       d.get("notified_on", ""), (ident.get("registration_number") or "").strip(),
                       ident.get("country_registered") or "", ident.get("place_registered") or "",
                       d.get("country_of_residence") or "")
