@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 import zipfile
+from pathlib import Path
 
 from tracer.http import Response, public_url
 
@@ -32,7 +34,6 @@ class FakeHttp:
 
 DART = "https://opendart.fss.or.kr/api"
 GLEIF = "https://api.gleif.org/api/v1"
-CH = "https://api.company-information.service.gov.uk"
 
 
 def corpcode_zip(corps: list[dict]) -> bytes:
@@ -75,3 +76,20 @@ def relationship(child: str, parent: str, level: str = "DIRECTLY", corroborated:
 def exception(lei: str, reason: str) -> dict:
     return {"data": {"type": "reporting-exceptions", "attributes": {
         "lei": lei, "category": "DIRECT_ACCOUNTING_CONSOLIDATION_PARENT", "reason": reason}}}
+
+
+def ch_index(path: Path, companies: list[tuple[str, str]], psc: list[dict]) -> Path:
+    """Small Companies House index. companies: (number, name); psc: snapshot records
+    {"company_number", "data"} as in the bulk file."""
+    from tracer.sources import ch_index as chi
+    from tracer import names
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.executescript(chi.SCHEMA + chi.INDEXES)
+    chi._insert(con, (("companies", (n, nm, names.normalize(nm), "Active")) for n, nm in companies))
+    chi._insert(con, chi.psc_rows(json.dumps(r) for r in psc))
+    con.execute("INSERT INTO meta VALUES ('psc_snapshot', '2026-10-16')")
+    con.commit()
+    con.close()
+    return path

@@ -41,6 +41,9 @@ SECRET_PARAMS = ("crtfc_key",)
 # SEC asks for at most ten requests per second.
 MIN_INTERVAL_SEC = {"www.sec.gov": 0.12, "data.sec.gov": 0.12}
 
+# Companies House bulk data index (built by scripts/build_ch_index.py; no account needed).
+CH_INDEX_PATH = Path(os.environ.get("TRACER_CH_INDEX", DATA_DIR / "ch" / "companies_house.sqlite"))
+
 # Tracing limits.
 MAX_DEPTH = int(os.environ.get("TRACER_MAX_DEPTH", "8"))
 MAX_ENTITIES = int(os.environ.get("TRACER_MAX_ENTITIES", "60"))

@@ -4,7 +4,8 @@ from datetime import date
 
 import pytest
 
-from tests.fakes import CH, DART, GLEIF, FakeHttp, corpcode_zip, exception, hyslr, lei_record
+from tests.fakes import DART, GLEIF, FakeHttp, ch_index, corpcode_zip, exception, hyslr, lei_record
+from tracer import config
 from tracer.models import Confidence, Relation, Terminal
 from tracer.orchestrator import Tracer
 from tracer.report import to_dot, to_markdown
@@ -13,9 +14,17 @@ OMEGA_LEI = "OMEGA0000000000000A1"
 
 
 @pytest.fixture
-def http(monkeypatch):
+def http(monkeypatch, tmp_path):
     monkeypatch.setenv("DART_API_KEY", "k")
-    monkeypatch.setenv("COMPANIES_HOUSE_API_KEY", "k")
+    # Omega: found in the Companies House bulk index, joined to GLEIF by name.
+    path = ch_index(tmp_path / "ch.sqlite", [("01234567", "OMEGA HOLDINGS LIMITED")], [
+        {"company_number": "01234567", "data": {
+            "kind": "individual-person-with-significant-control", "name": "Ms Jane Doe", "notified_on": "2024-02-01",
+            "natures_of_control": ["ownership-of-shares-75-to-100-percent", "voting-rights-75-to-100-percent"]}},
+        {"company_number": "01234567", "data": {
+            "kind": "individual-person-with-significant-control", "name": "Mr Old Owner", "ceased_on": "2023-01-01",
+            "natures_of_control": ["ownership-of-shares-75-to-100-percent"]}}])
+    monkeypatch.setattr(config, "CH_INDEX_PATH", path)
     h = FakeHttp()
     h.add(f"{DART}/corpCode.xml", corpcode_zip([
         {"corp_code": "00000001", "corp_name": "알파전자", "stock_code": "111111"},
@@ -28,11 +37,6 @@ def http(monkeypatch):
           {"corp_code": "00000002"})
     h.add(f"{DART}/hyslrSttus.json", hyslr([("알파전자", "계열회사", "12.00")]), {"corp_code": "00000003"})
     h.add(f"{DART}/company.json", {"status": "000", "bizr_no": "1112233333"}, {"corp_code": "00000001"})
-    # Omega: found by Companies House search, joined to GLEIF by name.
-    h.add(f"{CH}/search/companies", {"items": [{"company_number": "1234567", "title": "OMEGA HOLDINGS LIMITED"}]})
-    h.add(f"{CH}/company/01234567/persons-with-significant-control", {"items": [
-        {"kind": "individual-person-with-significant-control", "name": "Ms Jane Doe", "notified_on": "2024-02-01",
-         "natures_of_control": ["ownership-of-shares-75-to-100-percent", "voting-rights-75-to-100-percent"]}]})
     for q in ("OMEGA HOLDINGS LIMITED", "Omega Holdings Limited"):
         h.add(f"{GLEIF}/lei-records", {"data": [lei_record(OMEGA_LEI, "OMEGA HOLDINGS LIMITED", "GB", "RA000585", "01234567")]},
               {"filter[fulltext]": q})
@@ -56,6 +60,8 @@ def test_full_chain(http):
     assert omega.identifiers.get("lei") == OMEGA_LEI
     psc = [e for e in g.owners_of(omega.id) if e.relation == Relation.PSC]
     assert psc and psc[0].share_text.startswith("주식 75~100%") and psc[0].share_pct is None
+    assert len(psc) == 1  # the ceased PSC is not loaded
+    assert "snapshot 2026-10-16" in psc[0].evidence[0].locator
     jane = g.entities[psc[0].owner_id]
     assert jane.terminal == Terminal.INDIVIDUAL
     # 알파 -> 감마 -> 베타 -> 알파 is a cycle.
@@ -67,8 +73,8 @@ def test_full_chain(http):
     assert "사람 검토 목록" in md and "Ms Jane Doe" in md
 
 
-def test_missing_key_is_reported_not_raised(http, monkeypatch):
-    monkeypatch.delenv("COMPANIES_HOUSE_API_KEY")
+def test_missing_index_is_reported_not_raised(http, monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "CH_INDEX_PATH", tmp_path / "none.sqlite")
     g = Tracer(http, today=date(2026, 10, 17)).trace("알파전자")
     assert any(u.code == "companies_house_unavailable" for u in g.unknowns)
     # Omega is still found through GLEIF, which carries its UK company number.

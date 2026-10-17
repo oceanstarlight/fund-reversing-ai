@@ -28,7 +28,8 @@
 | `tracer/sources/dart.py` | 고유번호 목록, 기업개황(사업자번호), 최대주주 현황(hyslrSttus) |
 | `tracer/sources/gleif.py` | LEI 조회·검색, 직접/최종 모회사, 미보고 사유 → 종착 매핑 |
 | `tracer/sources/sec.py` | 티커 목록, submissions, 구조화 13D/13G XML 파싱 (구형식 텍스트는 검토 목록) |
-| `tracer/sources/companies_house.py` | 회사 검색, PSC, PSC 진술(statement) |
+| `tracer/sources/companies_house.py` | 회사 검색, PSC, PSC 진술(statement) — 로컬 일괄 데이터 색인에서 읽음 |
+| `tracer/sources/ch_index.py` + `scripts/build_ch_index.py` | Companies House 무료 일괄 데이터(PSC 스냅샷 일 단위, 회사 기본정보 월 단위)를 SQLite로 적재. 계정·키 불필요 |
 | `tracer/names.py` | 이름 정규화(법인 형태 제거), rapidfuzz 매칭, 보유자 유형 규칙 |
 | `tracer/http.py` | 디스크 캐시(같은 추적 재실행 시 API 비용 0), 호스트별 호출 간격, 키 제거된 근거 URL |
 | `tracer/extract.py` + `tracer/llm.py` | 유일한 LLM 사용처: LPA·PPM에서 지분 조항 추출, 원문 인용 검증 통과분만 "추정"으로 |
@@ -49,7 +50,8 @@
 ## 비용
 
 - 추적은 전부 결정적 코드라 LLM 비용 0. LLM은 문서 추출을 명시적으로 돌릴 때만.
-- 모든 소스 무료 등급: GLEIF(키 없음), SEC(키 없음, 연락처 User-Agent), OpenDART(무료 키, 일 2만 건), Companies House(무료 키).
+- 모든 소스 무료: GLEIF(키 없음), SEC(키 없음, 연락처 User-Agent), OpenDART(무료 키, 일 2만 건), Companies House(일괄 데이터, 키 없음).
+- Companies House는 API 가입에 영국 인증 절차가 필요해 일괄 데이터로 대체했다. 대가는 최신성(PSC 하루, 회사명 한 달)과 로컬 디스크 사용.
 - HTTP 응답은 24시간 디스크 캐시(DART 고유번호 목록은 7일).
 
 ## kr-fund-ai-agent에서 가져온 것

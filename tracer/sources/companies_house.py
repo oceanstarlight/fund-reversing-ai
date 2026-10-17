@@ -1,21 +1,24 @@
-"""UK Companies House (key required, free): company search and the PSC register.
+"""UK Companies House: company search and the PSC register, read from the local bulk index.
 
 PSC ("person with significant control") entries name individuals or legal entities with
 more than a quarter of shares or votes, or other control. Ownership is published as a band
 (e.g. 25-50%), so ``share_text`` keeps the band and ``share_pct`` stays empty.
+
+The data comes from Companies House's free bulk downloads (``ch_index.py``), so no account or
+API key is needed; the trade-off is a daily (PSC) and monthly (names) refresh instead of live.
 """
 
 from __future__ import annotations
 
 import re
 
-from tracer import config, names
+from tracer import names
 from tracer.models import (
     Confidence, Edge, Entity, EntityKind, Evidence, OwnersResult, Relation, ReviewItem, Terminal, Unknown,
 )
 from tracer.sources.base import Candidate, LookupResult, Source, failure
+from tracer.sources.ch_index import ChIndex
 
-API = "https://api.company-information.service.gov.uk"
 WEB = "https://find-and-update.company-information.service.gov.uk"
 _UK = re.compile(r"england|wales|scotland|northern ireland|united kingdom|\buk\b|great britain|companies house", re.I)
 _BAND = re.compile(r"(ownership-of-shares|voting-rights)-(\d+)-to-(\d+)-percent")
@@ -51,23 +54,22 @@ class CompaniesHouseSource(Source):
     name = "companies_house"
     label_ko = "Companies House"
 
+    def __init__(self, http, index: ChIndex | None = None):
+        super().__init__(http)
+        self.index = index or ChIndex()
+
     def available(self) -> tuple[bool, str]:
-        return (True, "") if config.env("COMPANIES_HOUSE_API_KEY") else (False, "API 키가 없어 영국 PSC를 조회하지 못함")
+        return (True, "") if self.index.exists() else (False, "영국 일괄 데이터 색인이 없어 PSC를 조회하지 못함")
 
     def handles(self, entity: Entity) -> bool:
         return "ch" in entity.identifiers
 
-    def _get(self, path: str, params: dict | None = None):
-        return self.http.get(f"{API}{path}", params=params, auth=(config.env("COMPANIES_HOUSE_API_KEY"), ""))
-
     def get(self, number: str) -> Entity | None:
         number = normalize_number(number)
-        r = self._get(f"/company/{number}")
-        if r.status != 200:
+        row = self.index.company(number) if self.index.exists() else None
+        if row is None:
             return None
-        d = r.json()
-        return Entity(id=f"ch:{number}", name=d.get("company_name", number), kind=EntityKind.COMPANY,
-                      jurisdiction="GB", identifiers={"ch": number})
+        return Entity(id=f"ch:{number}", name=row[0], kind=EntityKind.COMPANY, jurisdiction="GB", identifiers={"ch": number})
 
     def search(self, name: str) -> LookupResult:
         out = LookupResult()
@@ -76,14 +78,13 @@ class CompaniesHouseSource(Source):
             out.unknowns.append(self.unavailable_unknown())
             return out
         try:
-            r = self._get("/search/companies", {"q": name, "items_per_page": 10})
-            for it in r.json().get("items", []) if r.status == 200 else []:
-                number = normalize_number(it["company_number"])
-                e = Entity(id=f"ch:{number}", name=it.get("title", number), jurisdiction="GB", identifiers={"ch": number})
-                out.candidates.append(Candidate(e, names.score(name, e.name), e.name))
+            for number, title, _status in self.index.search(name):
+                e = Entity(id=f"ch:{number}", name=title, jurisdiction="GB", identifiers={"ch": number})
+                out.candidates.append(Candidate(e, names.score(name, title), title))
         except Exception as exc:  # noqa: BLE001
             out.unknowns.append(failure(self.name, self.label_ko, exc))
         out.candidates.sort(key=lambda c: -c.score)
+        del out.candidates[10:]
         return out
 
     def owners(self, entity: Entity) -> OwnersResult:
@@ -94,9 +95,7 @@ class CompaniesHouseSource(Source):
             return res
         number = entity.identifiers["ch"]
         try:
-            r = self._get(f"/company/{number}/persons-with-significant-control", {"items_per_page": 100})
-            items = r.json().get("items", []) if r.status == 200 else []
-            active = [i for i in items if not i.get("ceased_on")]
+            active = self.index.psc(number)  # ceased entries are dropped when the index is built
             for it in active:
                 self._add_psc(res, entity, number, it)
             if not active:
@@ -110,7 +109,7 @@ class CompaniesHouseSource(Source):
         nm = it.get("name") or "(이름 비공개)"
         control = describe_control(it.get("natures_of_control") or [])
         ev = Evidence(source=self.name, title=f"PSC register · {entity.name}", url=psc_url(number),
-                      as_of=it.get("notified_on", ""), locator=kind,
+                      as_of=it.get("notified_on", ""), locator=f"{kind} · snapshot {self.index.meta('psc_snapshot')}",
                       quote=f"{nm} | {', '.join(it.get('natures_of_control') or [])}")
         conf = Confidence.CONFIRMED
         if kind.startswith("individual"):
@@ -139,9 +138,7 @@ class CompaniesHouseSource(Source):
                               note="PSC 지분은 구간으로만 공시됨"))
 
     def _statements(self, res: OwnersResult, entity: Entity, number: str) -> None:
-        r = self._get(f"/company/{number}/persons-with-significant-control-statements")
-        stmts = [s for s in (r.json().get("items", []) if r.status == 200 else []) if not s.get("ceased_on")]
-        codes = {s.get("statement", "") for s in stmts}
+        codes = {s["statement"] for s in self.index.statements(number) if s["statement"]}
         if codes & _DISPERSED_STATEMENTS:
             res.terminal, res.terminal_note = Terminal.DISPERSED, "Companies House: 중대한 지배자 없음 진술"
             return
